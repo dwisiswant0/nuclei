@@ -1,0 +1,57 @@
+name: perf-investigate-after-f893b6c0
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  perf-investigate-after-f893b6c0:
+    runs-on: ubuntu-latest
+    env:
+      COMMIT_BEFORE: "0e67be77" # fix DAST skipping URLs with part: request and mode: multiple (#7326)
+      COMMIT_AFTER: "f893b6c0" # refactor: native tests (#7307), basically dev
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: projectdiscovery/actions/setup/go@v1
+        with:
+          go-version: "stable"
+      - uses: projectdiscovery/nuclei-action/cache@v3
+      - run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - run: |
+          make build-test
+          ./bin/nuclei.test -test.run - \
+            -test.count=6 \
+            -test.bench=. \
+            -test.benchmem \
+            ./cmd/nuclei/ | \
+              tee $COMMIT_AFTER
+        env:
+          DISABLE_STDOUT: "1"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: "perf-investigate-${{ env.COMMIT_AFTER }}"
+          path: "${{ github.workspace }}/cmd/nuclei/BenchmarkRunEnumeration-*.prof"
+
+      - run: |
+          rm -rf cmd/nuclei/BenchmarkRunEnumeration-*.prof
+          git reset --hard $COMMIT_BEFORE
+
+      - run: |
+          make build-test
+          ./bin/nuclei.test -test.run - \
+            -test.count=6 \
+            -test.bench=. \
+            -test.benchmem \
+            ./cmd/nuclei/ | \
+              tee $COMMIT_BEFORE
+        env:
+          DISABLE_STDOUT: "1"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: "perf-investigate-${{ env.COMMIT_BEFORE }}"
+          path: "${{ github.workspace }}/cmd/nuclei/BenchmarkRunEnumeration-*.prof"
+
+      - run: benchstat $COMMIT_BEFORE $COMMIT_AFTER
+
